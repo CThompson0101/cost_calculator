@@ -1067,7 +1067,7 @@ with tab_input:
     with input_tabs[6]:
         st.markdown("</div>", unsafe_allow_html=True)
         #st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.caption("Higher vision weights steer the solver to prioritize the enablers needed to unlock higher‑vision use cases")
+        st.caption("Higher vision weights steer the solver to prioritize the enablers needed to unlock higher‑vision use cases.")
 
         if not st.session_state.df_ben.empty:
             current_use_cases = st.session_state.df_ben["Use Case"].tolist()
@@ -1388,3 +1388,4 @@ with tab_output:
 #         "- **Objective** is always **Benefit − Cost** over the selected ROI window.\n"
 #         "- **Vision Priority** is used only as a small tie-breaker to select among near-equal ROI solutions."
 #     )
+
