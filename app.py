@@ -2,11 +2,190 @@ import streamlit as st
 import pulp as pl
 import pandas as pd
 
+# Optional chart library for a more "product" look
+try:
+    import altair as alt
+    _ALTAIR_OK = True
+except Exception:
+    _ALTAIR_OK = False
+
+from io import BytesIO
+import zipfile
+
+# ------------------------------------------------------------
+# Streamlit config MUST be first Streamlit command
+# ------------------------------------------------------------
+st.set_page_config(
+    layout="wide",
+    page_title="Benefits Vs. Cost Calculator",
+    page_icon="📊",
+    initial_sidebar_state="expanded",
+)
+
+# ------------------------------------------------------------
+# "IOPs-style" UI polish (CSS)
+# ------------------------------------------------------------
+def inject_css():
+    st.markdown(
+        """
+        <style>
+          /* Global spacing */
+          .block-container { padding-top: 1.1rem; padding-bottom: 2.2rem; }
+
+          /* Hide Streamlit chrome (optional – looks more like a product) */
+          #MainMenu { visibility: hidden; }
+          footer { visibility: hidden; }
+
+          /* Keep header alive so sidebar toggle can exist */
+          header, header[data-testid="stHeader"]{
+            visibility: visible !important;
+            background: transparent !important;
+            box-shadow: none !important;
+          }
+
+          button[kind="secondary"],
+          button[data-testid="baseButton-secondary"],
+          button[data-testid="baseButton-tertiary"]{
+            color: #000 !important;
+          }
+
+          button[kind="secondary"] *,
+          button[data-testid="baseButton-secondary"] *,
+          button[data-testid="baseButton-tertiary"] *{
+            color: #000 !important;
+          }
+
+          /* Hide the top decoration strip */
+          div[data-testid="stDecoration"]{ display: none !important; }
+
+          /*
+            IMPORTANT:
+            Don't do: div[data-testid="stToolbar"]{ display: none; }
+            That can remove the sidebar reopen button in some Streamlit versions.
+            Instead hide only the toolbar action area (Deploy / menu widgets).
+          */
+          div[data-testid="stToolbarActions"]{ display: none !important; }
+          div[data-testid="stStatusWidget"]{ display: none !important; }
+
+          /* Force the sidebar toggle to be visible (covers multiple Streamlit versions) */
+          button[data-testid="stSidebarCollapseButton"],
+          button[data-testid="stSidebarCollapsedControl"],
+          div[data-testid="stSidebarCollapseButton"],
+          div[data-testid="stSidebarCollapsedControl"],
+          [data-testid="collapsedControl"],
+          button[title*="sidebar" i],
+          button[aria-label*="sidebar" i]{
+            display: flex !important;
+            visibility: visible !important;
+            position: fixed !important;
+            top: 0.75rem;
+            left: 0.75rem;
+            z-index: 999999;
+          }
+
+          /* Sidebar styling (dark, product-like) */
+          section[data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #0B0F19 0%, #111827 100%);
+            border-right: 1px solid rgba(255,255,255,0.06);
+          }
+          section[data-testid="stSidebar"] * { color: #FFFFFF !important; }
+          section[data-testid="stSidebar"] p { opacity: 0.9; }
+          section[data-testid="stSidebar"] a { color: #86BC25 !important; }
+          section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] small { opacity: 0.85; }
+
+          /* Inputs in sidebar */
+          section[data-testid="stSidebar"] input,
+          section[data-testid="stSidebar"] textarea,
+          section[data-testid="stSidebar"] .stSlider {
+            color: #0B0F19 !important;
+          }
+
+          /* Header */
+          .app-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 18px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #0B0F19 0%, #111827 55%, #0B0F19 100%);
+            border: 1px solid rgba(255,255,255,0.08);
+            margin-bottom: 14px;
+          }
+          .app-header-left { display: flex; align-items: center; gap: 12px; }
+          .brand-dot {
+            width: 12px; height: 12px; border-radius: 999px;
+            background: #86BC25;
+            box-shadow: 0 0 0 5px rgba(134,188,37,0.15);
+          }
+          .app-title { font-size: 18px; font-weight: 700; color: #F9FAFB; line-height: 1.2; }
+          .app-subtitle { font-size: 12px; color: rgba(249,250,251,0.78); margin-top: 2px; }
+          .header-chip {
+            font-size: 12px; color: rgba(249,250,251,0.82);
+            padding: 6px 10px; border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.10);
+            background: rgba(255,255,255,0.06);
+            white-space: nowrap;
+          }
+
+          /* Metric cards */
+          div[data-testid="metric-container"] {
+            background: #FFFFFF;
+            border: 1px solid #E7EAF0;
+            border-radius: 16px;
+            padding: 14px 14px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+          }
+          div[data-testid="stMetricValue"] { font-size: 1.9rem; }
+          div[data-testid="stMetricLabel"] { font-size: 0.95rem; opacity: 0.9; }
+
+          /* Tabs */
+          button[data-baseweb="tab"] {
+            border-radius: 12px;
+            padding: 10px 14px;
+          }
+          button[aria-selected="true"][data-baseweb="tab"] {
+            background: rgba(134,188,37,0.14);
+          }
+
+          /* Primary buttons */
+          .stButton button[kind="primary"] {
+            border-radius: 14px !important;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+          }
+
+          /* Soft section containers using markdown wrapper */
+          .section-card {
+            background: #FFFFFF;
+            border: 1px solid #E7EAF0;
+            border-radius: 16px;
+            padding: 14px 16px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+            margin: 8px 0 14px 0;
+          }
+
+          /* Dataframe border rounding */
+          div[data-testid="stDataFrame"] {
+            border: 1px solid #E7EAF0;
+            border-radius: 16px;
+            overflow: hidden;
+          }
+
+          /* Subtle captions */
+          .muted { color: rgba(11,15,25,0.68); font-size: 0.92rem; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+inject_css()
+
 # ------------------------------------------------------------
 # 6-period horizon: N to N+5
 # ------------------------------------------------------------
 T = [1, 2, 3, 4, 5, 6]
 Lbl = {t: ("N" if t == 1 else f"N+{t-1}") for t in T}
+LBL_ORDER = [Lbl[t] for t in T]
+T_MAX = max(T)
 
 # Default values (increased to allow all enablers)
 default_budget = {1: 2.0, 2: 2.0, 3: 6.5, 4: 6.0, 5: 6.0, 6: 5.5}
@@ -70,10 +249,20 @@ default_prereq_ready = {
 }
 
 # ------------------------------------------------------------
-# Helper functions to convert between DataFrames and nested dicts
+# Vision alignment scores (0..1) — used ONLY as a tie-breaker priority
+# (does NOT change the reported Objective, which remains Benefit - Cost)
+# ------------------------------------------------------------
+default_vision = {
+    "UC1": 0.95,
+    "UC2": 0.85,
+    "UC3": 0.55,
+    "UC4": 0.75,
+}
+
+# ------------------------------------------------------------
+# Helper functions
 # ------------------------------------------------------------
 def df_to_period_dict(df, id_col, value_cols):
-    """Convert a DataFrame with period columns to nested dict: {id: {t: val}}."""
     result = {}
     for _, row in df.iterrows():
         id_val = row[id_col]
@@ -83,18 +272,7 @@ def df_to_period_dict(df, id_col, value_cols):
                 result[id_val][t] = row[label]
     return result
 
-def period_dict_to_df(data, id_col, name_col, id_name_map):
-    """Convert nested dict to DataFrame with period columns."""
-    rows = []
-    for id_val in data:
-        row = {id_col: id_val, name_col: id_name_map[id_val]}
-        for t, label in Lbl.items():
-            row[label] = data[id_val][t]
-        rows.append(row)
-    return pd.DataFrame(rows)
-
 def req_dict_to_df(req_dict, use_cases, enablers, uc_name_map):
-    """Convert requirement dict to matrix DataFrame."""
     rows = []
     for uc in use_cases:
         row = {"Use Case": uc, "Name": uc_name_map.get(uc, uc)}
@@ -104,7 +282,6 @@ def req_dict_to_df(req_dict, use_cases, enablers, uc_name_map):
     return pd.DataFrame(rows)
 
 def df_to_req_dict(df, use_cases, enablers):
-    """Convert requirement matrix DataFrame back to nested dict."""
     req = {}
     for _, row in df.iterrows():
         uc = row["Use Case"]
@@ -114,36 +291,70 @@ def df_to_req_dict(df, use_cases, enablers):
     return req
 
 def dep_df_to_dict(df):
-    """Convert dependency DataFrame (Dependent, Prerequisite) to prereq_ready dict."""
     prereq = {}
     for _, row in df.iterrows():
         child = row["Dependent"]
         parent = row["Prerequisite"]
-        if child not in prereq:
-            prereq[child] = []
+        prereq.setdefault(child, [])
         if parent not in prereq[child]:
             prereq[child].append(parent)
     return prereq
 
 def dict_to_dep_df(prereq_dict):
-    """Convert prereq_ready dict to DataFrame with rows (Dependent, Prerequisite)."""
     rows = []
     for child, parents in prereq_dict.items():
         for p in parents:
             rows.append({"Dependent": child, "Prerequisite": p})
     return pd.DataFrame(rows)
 
+# Vision helpers
+def vision_dict_to_df(vision_dict, use_cases, uc_name_map):
+    return pd.DataFrame([
+        {"Use Case": uc, "Name": uc_name_map.get(uc, uc), "Vision Score (0-1)": float(vision_dict.get(uc, 0.0))}
+        for uc in use_cases
+    ])
+
+def df_to_vision_dict(df):
+    vision = {}
+    for _, row in df.iterrows():
+        vision[row["Use Case"]] = float(row["Vision Score (0-1)"])
+    return vision
+
+def period_label_to_t(label: str) -> int:
+    return next(k for k, v in Lbl.items() if v == label)
+
+def _blank_index(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    out.index = [""] * len(out)
+    return out
+
+def build_download_zip(files: dict[str, bytes]) -> bytes:
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in files.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
 # ------------------------------------------------------------
-# Initialize session state with default editable dataframes
+# Initialize session state (and reset helper)
 # ------------------------------------------------------------
-def init_session_state():
+def init_session_state(force_reset: bool = False):
+    if force_reset:
+        keys = [
+            "df_cons", "df_ben", "df_cost", "df_fte", "df_req", "df_dep", "df_vision",
+            "prev_enablers", "prev_use_cases_for_vision",
+            "solver_result", "current_data",
+        ]
+        for k in keys:
+            if k in st.session_state:
+                del st.session_state[k]
+
     if "df_cons" not in st.session_state:
         st.session_state.df_cons = pd.DataFrame([
             {"Period": Lbl[t], "Budget ($M)": default_budget[t], "FTE Cap": default_fte_cap[t]}
             for t in T
         ])
 
-    # Use Case Benefits (dynamic rows)
     if "df_ben" not in st.session_state:
         rows = []
         for uc in default_use_cases:
@@ -152,7 +363,6 @@ def init_session_state():
             rows.append(row)
         st.session_state.df_ben = pd.DataFrame(rows)
 
-    # Enabler Costs (dynamic rows)
     if "df_cost" not in st.session_state:
         rows = []
         for e in default_enablers:
@@ -161,7 +371,6 @@ def init_session_state():
             rows.append(row)
         st.session_state.df_cost = pd.DataFrame(rows)
 
-    # FTE Needed (dynamic rows)
     if "df_fte" not in st.session_state:
         rows = []
         for e in default_enablers:
@@ -170,58 +379,41 @@ def init_session_state():
             rows.append(row)
         st.session_state.df_fte = pd.DataFrame(rows)
 
-    # Requirements (will be rebuilt dynamically before display)
     if "df_req" not in st.session_state:
         st.session_state.df_req = req_dict_to_df(default_req, default_use_cases, default_enablers, default_uc_name)
 
-    # Dependencies (dynamic rows)
     if "df_dep" not in st.session_state:
         st.session_state.df_dep = dict_to_dep_df(default_prereq_ready)
+
+    if "df_vision" not in st.session_state:
+        st.session_state.df_vision = vision_dict_to_df(default_vision, default_use_cases, default_uc_name)
 
 init_session_state()
 
 # ------------------------------------------------------------
-# Sidebar: ROI horizon
-# ------------------------------------------------------------
-with st.sidebar:
-    st.header("Settings")
-    horizon = st.slider("ROI Horizon (years)", min_value=1, max_value=5, value=5)
-    roi_periods = list(range(1, horizon+1))
-    st.caption(f"Maximizing ROI over periods: {', '.join([Lbl[t] for t in roi_periods])}")
-
-# ------------------------------------------------------------
-# Helper to extract current data from session state
+# Extract current data
 # ------------------------------------------------------------
 def get_current_data():
-    # Constraints
-    budget = {}
-    fte_cap = {}
+    budget, fte_cap = {}, {}
     for _, row in st.session_state.df_cons.iterrows():
         label = row["Period"]
         t = next(k for k, v in Lbl.items() if v == label)
         budget[t] = float(row["Budget ($M)"])
         fte_cap[t] = float(row["FTE Cap"])
 
-    # Use cases and enablers from tables
     use_cases = st.session_state.df_ben["Use Case"].tolist()
     uc_name_map = dict(zip(st.session_state.df_ben["Use Case"], st.session_state.df_ben["Name"]))
     enablers = st.session_state.df_cost["Enabler"].tolist()
     en_name_map = dict(zip(st.session_state.df_cost["Enabler"], st.session_state.df_cost["Name"]))
 
-    # Benefits
     benefit = df_to_period_dict(st.session_state.df_ben, "Use Case", [Lbl[t] for t in T])
-
-    # Costs
     cost = df_to_period_dict(st.session_state.df_cost, "Enabler", [Lbl[t] for t in T])
-
-    # FTE
     fte = df_to_period_dict(st.session_state.df_fte, "Enabler", [Lbl[t] for t in T])
 
-    # Requirements
     req = df_to_req_dict(st.session_state.df_req, use_cases, enablers)
-
-    # Dependencies
     prereq_ready = dep_df_to_dict(st.session_state.df_dep)
+
+    vision = df_to_vision_dict(st.session_state.df_vision)
 
     return {
         "budget": budget,
@@ -231,6 +423,7 @@ def get_current_data():
         "fte": fte,
         "req": req,
         "prereq_ready": prereq_ready,
+        "vision": vision,  # used as tie-breaker only
         "use_cases": use_cases,
         "enablers": enablers,
         "uc_name_map": uc_name_map,
@@ -238,9 +431,10 @@ def get_current_data():
     }
 
 # ------------------------------------------------------------
-# Solver function (uses current data and horizon)
+# Solver: primary objective = Benefit - Cost
+# Vision is a SMALL tie-breaker: + vision_priority * vision_points
 # ------------------------------------------------------------
-def solve_model(data, roi_periods):
+def solve_model(data, roi_periods, vision_priority):
     use_cases = data["use_cases"]
     enablers = data["enablers"]
     T_local = T
@@ -287,18 +481,29 @@ def solve_model(data, roi_periods):
     for t in T_local:
         m += pl.lpSum(data["cost"][e][t] * startE[e][t] for e in enablers) <= data["budget"][t]
 
-    # FTE constraints: one‑time FTE when starting
+    # FTE constraints (one-time when starting)
     for t in T_local:
         m += pl.lpSum(data["fte"][e][t] * startE[e][t] for e in enablers) <= data["fte_cap"][t]
 
-    # Objective: maximize ROI over selected periods
-    benefit_roi = pl.lpSum(data["benefit"][uc][t] * activeUC[uc][t] for uc in use_cases for t in roi_periods)
-    cost_roi = pl.lpSum(data["cost"][e][t] * startE[e][t] for e in enablers for t in roi_periods)
-    m += benefit_roi - cost_roi
+    # Primary ROI objective components (ROI window)
+    benefit_roi_expr = pl.lpSum(
+        data["benefit"][uc][t] * activeUC[uc][t] for uc in use_cases for t in roi_periods
+    )
+    cost_roi_expr = pl.lpSum(
+        data["cost"][e][t] * startE[e][t] for e in enablers for t in roi_periods
+    )
+
+    # Tie-breaker: prioritize higher-vision use cases being active (ROI window)
+    vision_points_expr = pl.lpSum(
+        float(data["vision"].get(uc, 0.0)) * activeUC[uc][t] for uc in use_cases for t in roi_periods
+    )
+
+    # IMPORTANT: Reported "Objective" remains Benefit - Cost.
+    # We only add a *small* tie-breaker term to help choose among near-equal ROI solutions.
+    m += (benefit_roi_expr - cost_roi_expr) + (vision_priority * vision_points_expr)
 
     m.solve(pl.PULP_CBC_CMD(msg=False))
-    status = pl.LpStatus[m.status]
-    if status != "Optimal":
+    if pl.LpStatus[m.status] != "Optimal":
         return None
 
     def v(x):
@@ -307,7 +512,11 @@ def solve_model(data, roi_periods):
     enabler_start = {e: next((t for t in T_local if v(startE[e][t]) > 0.5), None) for e in enablers}
     uc_start = {uc: next((t for t in T_local if v(startUC[uc][t]) > 0.5), None) for uc in use_cases}
 
-    # Build summary
+    # Compute reported ROI totals (no vision in reported objective)
+    roi_ben = sum(data["benefit"][uc][t] * v(activeUC[uc][t]) for uc in use_cases for t in roi_periods)
+    roi_cost = sum(data["cost"][e][t] * v(startE[e][t]) for e in enablers for t in roi_periods)
+    roi_obj = roi_ben - roi_cost
+
     summary = []
     for t in T_local:
         spend = sum(data["cost"][e][t] * v(startE[e][t]) for e in enablers)
@@ -323,20 +532,17 @@ def solve_model(data, roi_periods):
         })
     df_summary = pd.DataFrame(summary)
 
-    roi_ben = sum(data["benefit"][uc][t] * v(activeUC[uc][t]) for uc in use_cases for t in roi_periods)
-    roi_cost = sum(data["cost"][e][t] * v(startE[e][t]) for e in enablers for t in roi_periods)
-
     return {
         "enabler_start_idx": enabler_start,
         "uc_start_idx": uc_start,
         "df_summary": df_summary,
         "roi_ben": roi_ben,
         "roi_cost": roi_cost,
-        "roi_obj": roi_ben - roi_cost,
+        "roi_obj": roi_obj,  # Benefit - Cost (reported)
     }
 
 # ------------------------------------------------------------
-# What-if computation (uses current data, one‑time FTE)
+# What-if computation (reported Objective stays Benefit - Cost)
 # ------------------------------------------------------------
 def compute_whatif(data, enabler_start_idx, roi_periods):
     enablers = data["enablers"]
@@ -369,23 +575,18 @@ def compute_whatif(data, enabler_start_idx, roi_periods):
                     f"but requires {data['en_name_map'].get(p, p)} ({p}) which starts at {Lbl[p_start] if p_start else 'never'}."
                 )
 
-    # Budget/FTE violations (FTE is one‑time when starting)
-    budget_violations = []
-    fte_violations = []
+    # Budget/FTE violations
+    budget_violations, fte_violations = [], []
     for t in T_local:
         spend_t = sum(data["cost"][e][t] for e in enablers if enabler_start_idx.get(e) == t)
         if spend_t > data["budget"][t] + 1e-6:
-            budget_violations.append(
-                f"{Lbl[t]}: Spend ${spend_t:.2f}M exceeds budget ${data['budget'][t]:.2f}M"
-            )
+            budget_violations.append(f"{Lbl[t]}: Spend ${spend_t:.2f}M exceeds budget ${data['budget'][t]:.2f}M")
 
         fte_t = sum(data["fte"][e][t] for e in enablers if enabler_start_idx.get(e) == t)
         if fte_t > data["fte_cap"][t] + 1e-6:
-            fte_violations.append(
-                f"{Lbl[t]}: FTE used {fte_t:.1f} exceeds cap {data['fte_cap'][t]:.1f}"
-            )
+            fte_violations.append(f"{Lbl[t]}: FTE used {fte_t:.1f} exceeds cap {data['fte_cap'][t]:.1f}")
 
-    # Use case start times
+    # Use case start times (earliest feasible)
     uc_start_idx = {}
     for uc in use_cases:
         required = [e for e in enablers if data["req"].get(uc, {}).get(e, 0) == 1]
@@ -403,15 +604,19 @@ def compute_whatif(data, enabler_start_idx, roi_periods):
                 if t >= t0:
                     activeUC[uc][t] = 1
 
-    # ROI totals (FIXED: correctly use the start period to fetch cost)
+    # ROI totals (reported objective Benefit - Cost)
     roi_ben = sum(data["benefit"][uc][t] * activeUC[uc][t] for uc in use_cases for t in roi_periods)
+
+    # Cost is one-time at start, attributed to the start period
     roi_cost = 0.0
     for e in enablers:
         t0 = enabler_start_idx.get(e)
         if t0 is not None and t0 in roi_periods:
             roi_cost += data["cost"][e][t0]
 
-    # Build output tables
+    roi_obj = roi_ben - roi_cost
+
+    # Tables
     df_E = pd.DataFrame([
         {"Enabler": e, "Name": data['en_name_map'].get(e, e), "Start": Lbl[t0] if t0 else "-"}
         for e, t0 in enabler_start_idx.items()
@@ -445,31 +650,293 @@ def compute_whatif(data, enabler_start_idx, roi_periods):
         "df_summary": df_summary,
         "roi_ben": roi_ben,
         "roi_cost": roi_cost,
-        "roi_obj": roi_ben - roi_cost,
+        "roi_obj": roi_obj,
     }
 
 # ------------------------------------------------------------
-# Streamlit UI
+# Executive visuals helpers (Altair)
 # ------------------------------------------------------------
-st.set_page_config(layout="wide", page_title="Benefits Vs. Cost Calculator")
-st.title("📊 Benefits Vs. Cost Calculator")
-#st.markdown("**Goal: Output which enabler to implement at what time**")
+def _df_util_from_summary(df_summary: pd.DataFrame, data: dict, roi_periods: list[int]) -> pd.DataFrame:
+    df = df_summary.copy()
+    df["t"] = df["Period"].map({Lbl[t]: t for t in T})
+    df["Budget Cap ($M)"] = df["t"].map(data["budget"])
+    df["FTE Cap"] = df["t"].map(data["fte_cap"])
+    df["Budget Util %"] = (df["Spend ($M)"] / df["Budget Cap ($M)"]).replace([float("inf")], 0.0) * 100
+    df["FTE Util %"] = (df["FTE Used"] / df["FTE Cap"]).replace([float("inf")], 0.0) * 100
+    df["Cum Net ($M)"] = df["Net ($M)"].cumsum()
+    df["In ROI Window"] = df["t"].apply(lambda x: "✓" if x in roi_periods else "")
+    return df
 
+def _gantt_df(plan_map: dict, name_map: dict) -> pd.DataFrame:
+    rows = []
+    for k, t0 in plan_map.items():
+        if t0 is None:
+            continue
+        rows.append({
+            "ID": k,
+            "Name": name_map.get(k, k),
+            "Start_t": t0,
+            "End_t": T_MAX + 0.9,
+            "Start": Lbl[t0],
+        })
+    if not rows:
+        return pd.DataFrame(columns=["ID", "Name", "Start_t", "End_t", "Start"])
+    return pd.DataFrame(rows).sort_values(["Start_t", "Name"]).reset_index(drop=True)
+
+def _axis_periods():
+    # Numeric periods with friendly labels (N, N+1, ...)
+    return alt.Axis(
+        title=None,
+        values=T,
+        labelExpr="datum.value==1 ? 'N' : 'N+' + (datum.value-1)"
+    )
+
+def chart_gantt(df_gantt: pd.DataFrame, title: str):
+    if not _ALTAIR_OK or df_gantt.empty:
+        return None
+    height = max(220, 26 * len(df_gantt))
+    bars = (
+        alt.Chart(df_gantt)
+        .mark_bar()
+        .encode(
+            y=alt.Y("Name:N", sort=alt.SortField("Start_t", order="ascending"), title=None),
+            x=alt.X("Start_t:Q", axis=_axis_periods()),
+            x2=alt.X2("End_t:Q"),
+            tooltip=[alt.Tooltip("Name:N"), alt.Tooltip("Start:N")],
+        )
+        .properties(title=title, height=height)
+    )
+    labels = (
+        alt.Chart(df_gantt)
+        .mark_text(align="left", dx=4)
+        .encode(
+            y=alt.Y("Name:N", sort=alt.SortField("Start_t", order="ascending")),
+            x=alt.X("Start_t:Q"),
+            text=alt.Text("Start:N"),
+        )
+    )
+    return bars + labels
+
+def chart_budget(df_util: pd.DataFrame):
+    if not _ALTAIR_OK:
+        return None
+    base = alt.Chart(df_util).encode(
+        x=alt.X("Period:N", sort=LBL_ORDER, title=None),
+        tooltip=[
+            "Period:N",
+            alt.Tooltip("Spend ($M):Q", format=".2f"),
+            alt.Tooltip("Budget Cap ($M):Q", format=".2f"),
+            alt.Tooltip("Budget Util %:Q", format=".1f"),
+        ],
+    )
+    bars = base.mark_bar().encode(y=alt.Y("Spend ($M):Q", title="$M"))
+    cap = base.mark_line(point=True).encode(y=alt.Y("Budget Cap ($M):Q"))
+    return (bars + cap).properties(title="Budget: Spend vs Cap", height=240)
+
+def chart_fte(df_util: pd.DataFrame):
+    if not _ALTAIR_OK:
+        return None
+    base = alt.Chart(df_util).encode(
+        x=alt.X("Period:N", sort=LBL_ORDER, title=None),
+        tooltip=[
+            "Period:N",
+            alt.Tooltip("FTE Used:Q", format=".1f"),
+            alt.Tooltip("FTE Cap:Q", format=".1f"),
+            alt.Tooltip("FTE Util %:Q", format=".1f"),
+        ],
+    )
+    bars = base.mark_bar().encode(y=alt.Y("FTE Used:Q", title="FTE"))
+    cap = base.mark_line(point=True).encode(y=alt.Y("FTE Cap:Q"))
+    return (bars + cap).properties(title="Capacity: FTE Used vs Cap", height=240)
+
+def chart_value(df_util: pd.DataFrame):
+    if not _ALTAIR_OK:
+        return None
+    base = alt.Chart(df_util).encode(
+        x=alt.X("Period:N", sort=LBL_ORDER, title=None),
+        tooltip=[
+            "Period:N",
+            alt.Tooltip("Benefit ($M):Q", format=".2f"),
+            alt.Tooltip("Spend ($M):Q", format=".2f"),
+            alt.Tooltip("Net ($M):Q", format=".2f"),
+        ],
+    )
+    ben = base.mark_line(point=True).encode(y=alt.Y("Benefit ($M):Q", title="$M"))
+    spend = base.mark_line(point=True).encode(y=alt.Y("Spend ($M):Q"))
+    return (ben + spend).properties(title="Value: Benefit vs Spend", height=240)
+
+def chart_cum_net(df_util: pd.DataFrame):
+    if not _ALTAIR_OK:
+        return None
+    return (
+        alt.Chart(df_util)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("Period:N", sort=LBL_ORDER, title=None),
+            y=alt.Y("Cum Net ($M):Q", title="$M"),
+            tooltip=["Period:N", alt.Tooltip("Cum Net ($M):Q", format=".2f")],
+        )
+        .properties(title="Cumulative Net Value", height=240)
+    )
+
+def chart_requirements_heatmap(data: dict):
+    if not _ALTAIR_OK:
+        return None
+    rows = []
+    for uc in data["use_cases"]:
+        for e in data["enablers"]:
+            rows.append({
+                "Use Case": data["uc_name_map"].get(uc, uc),
+                "Enabler": data["en_name_map"].get(e, e),
+                "Required": int(data["req"].get(uc, {}).get(e, 0)),
+            })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return None
+    height = max(260, 28 * len(data["use_cases"]))
+    return (
+        alt.Chart(df)
+        .mark_rect()
+        .encode(
+            x=alt.X("Enabler:N", title=None, sort=None),
+            y=alt.Y("Use Case:N", title=None, sort=None),
+            color=alt.Color("Required:Q", legend=None),
+            tooltip=["Use Case:N", "Enabler:N", "Required:Q"],
+        )
+        .properties(title="Use Case → Enabler Requirements (1 = required)", height=height)
+    )
+
+def compute_exec_insights(res: dict, data: dict, roi_periods: list[int]):
+    df_util = _df_util_from_summary(res["df_summary"], data, roi_periods)
+
+    payback_label = "—"
+    payback_row = df_util[df_util["Cum Net ($M)"] > 0].head(1)
+    if not payback_row.empty:
+        payback_label = payback_row.iloc[0]["Period"]
+
+    roi_multiple = None
+    if res["roi_cost"] > 1e-9:
+        roi_multiple = res["roi_ben"] / res["roi_cost"]
+
+    return {
+        "df_util": df_util,
+        "payback": payback_label,
+        "peak_budget_util": float(df_util["Budget Util %"].max()) if not df_util.empty else 0.0,
+        "peak_fte_util": float(df_util["FTE Util %"].max()) if not df_util.empty else 0.0,
+        "roi_multiple": roi_multiple,
+    }
+
+# ------------------------------------------------------------
+# Header (product-style)
+# ------------------------------------------------------------
+def render_header():
+    # Optional logo support (place assets/logo.png). Safe if missing.
+    logo_col, title_col, chip_col = st.columns([0.12, 0.68, 0.20], vertical_alignment="center")
+    with logo_col:
+        try:
+            st.image("assets/logo.png", use_container_width=True)
+        except Exception:
+            st.markdown(
+                '<div class="brand-dot" style="margin-left:6px;"></div>',
+                unsafe_allow_html=True
+            )
+    with title_col:
+        st.markdown(
+            """
+            <div style="margin-top:2px;">
+              <div style="font-weight:800; font-size: 22px; line-height:1.15; color:#0B0F19;">
+                Benefits Vs. Cost Calculator
+              </div>
+              <div class="muted" style="margin-top:4px;">
+                ROI roadmap optimizer — objective is to maximize ROI
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with chip_col:
+        st.markdown(
+            """
+            <div style="display:flex; justify-content:flex-end;">
+              <div class="header-chip" style="color:#0B0F19; border:1px solid #E7EAF0; background:#FFFFFF;">
+                Horizon: 6 periods (N…N+5)
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+render_header()
+
+# ------------------------------------------------------------
+# Sidebar: ROI horizon + Vision tie-break strength (same as original)
+# + adds scenario controls + reset
+# ------------------------------------------------------------
+with st.sidebar:
+    st.markdown("## Settings")
+    scenario = st.text_input("Scenario Name", value="Base Case")
+
+    horizon = st.slider("ROI Horizon (years)", min_value=1, max_value=5, value=5)
+    roi_periods = list(range(1, horizon + 1))
+    st.caption(f"Maximizing ROI over periods: {', '.join([Lbl[t] for t in roi_periods])}")
+
+    # Vision is used ONLY as a small tie-breaker in the solver (does not change reported Objective)
+    vision_priority = st.slider("Vision Priority", 0.0, 0.5, 0.05, 0.01)
+    st.caption("Objective remains Benefit - Cost; Higher vision weights steer the solver to prioritize the enablers needed to unlock higher‑vision use cases.")
+
+    st.divider()
+    colA, colB = st.columns(2)
+    # with colA:
+    #     if st.button("Reset", type="secondary", use_container_width=True):
+    #         init_session_state(force_reset=True)
+    #         st.success("Reset complete.")
+    #         st.rerun()
+    # with colB:
+    #     st.caption(f"Last refresh: {datetime.now().strftime('%H:%M:%S')}")
+
+    st.divider()
+    # st.caption("Tip: add `assets/logo.png` to show your org logo in the header.")
+
+# ------------------------------------------------------------
+# Streamlit UI (KEEP original naming & flow)
+# ------------------------------------------------------------
 tab_input, tab_output = st.tabs(["📥 Input Data", "📈 Output"])
 
 with tab_input:
-    st.subheader("Input Parameters")
+    st.markdown(
+        """
+        <div class="section-card">
+          <div style="font-weight:700; font-size:16px;">Input Parameters</div>
+          <div class="muted" style="margin-top:4px;">
+            Review and update the model inputs and constraints below, then run the solver to generate the recommended roadmap
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # #Quick stats row (nice for exec polish, doesn’t change flow)
+    # c1, c2, c3, c4 = st.columns(4)
+    # c1.metric("Use Cases", int(len(st.session_state.df_ben)) if "df_ben" in st.session_state else 0)
+    # c2.metric("Enablers", int(len(st.session_state.df_cost)) if "df_cost" in st.session_state else 0)
+    # c3.metric("Periods", len(T))
+    # c4.metric("ROI Horizon", f"{horizon} yrs")
+
     input_tabs = st.tabs([
         "Constraints",
         "Use Case Benefits",
         "Enabler Costs",
         "FTE Needed",
         "Requirements",
-        "Dependencies"
+        "Dependencies",
+        "Vision",
     ])
-
-    # Constraints (fixed rows)
+    
+    # Constraints
     with input_tabs[0]:
+        st.markdown("</div>", unsafe_allow_html=True)
+        #st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.caption("Define budget and FTE capacity for each period.")
         st.session_state.df_cons = st.data_editor(
             st.session_state.df_cons,
             column_config={
@@ -481,9 +948,13 @@ with tab_input:
             hide_index=True,
             num_rows="fixed"
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # Use Case Benefits (dynamic rows)
+    # Use Case Benefits
     with input_tabs[1]:
+        st.markdown("</div>", unsafe_allow_html=True)
+        #st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.caption("Benefits accrue for active use cases across periods.")
         st.session_state.df_ben = st.data_editor(
             st.session_state.df_ben,
             column_config={
@@ -495,9 +966,12 @@ with tab_input:
             hide_index=True,
             num_rows="dynamic"
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # Enabler Costs (dynamic rows)
+    # Enabler Costs
     with input_tabs[2]:
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.caption("One-time spend occurs when an enabler is started.")
         st.session_state.df_cost = st.data_editor(
             st.session_state.df_cost,
             column_config={
@@ -509,9 +983,12 @@ with tab_input:
             hide_index=True,
             num_rows="dynamic"
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # FTE Needed (dynamic rows)
+    # FTE Needed
     with input_tabs[3]:
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.caption("FTE is consumed in the period an enabler is started.")
         st.session_state.df_fte = st.data_editor(
             st.session_state.df_fte,
             column_config={
@@ -523,30 +1000,26 @@ with tab_input:
             hide_index=True,
             num_rows="dynamic"
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # Requirements (dynamic rows and columns)
+    # Requirements
     with input_tabs[4]:
-        # Get current enablers from df_cost
-        if not st.session_state.df_cost.empty:
-            current_enablers = st.session_state.df_cost["Enabler"].tolist()
-        else:
-            current_enablers = []
-        # Get current use cases from df_ben
+        #st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.caption("Matrix indicating which enablers are required for each use case (0/1).")
+
+        current_enablers = st.session_state.df_cost["Enabler"].tolist() if not st.session_state.df_cost.empty else []
         if not st.session_state.df_ben.empty:
             current_use_cases = st.session_state.df_ben["Use Case"].tolist()
             uc_name_map = dict(zip(st.session_state.df_ben["Use Case"], st.session_state.df_ben["Name"]))
         else:
-            current_use_cases = []
-            uc_name_map = {}
+            current_use_cases, uc_name_map = [], {}
 
-        # Rebuild df_req if enablers changed (preserve existing data)
         if "prev_enablers" not in st.session_state or st.session_state.prev_enablers != current_enablers:
-            # Create new df with all use cases and enabler columns
             new_rows = []
             for uc in current_use_cases:
                 row = {"Use Case": uc, "Name": uc_name_map.get(uc, uc)}
                 for e in current_enablers:
-                    # Try to get old value if it existed
                     if not st.session_state.df_req.empty and uc in st.session_state.df_req["Use Case"].values:
                         old_row = st.session_state.df_req[st.session_state.df_req["Use Case"] == uc].iloc[0]
                         row[e] = old_row.get(e, 0)
@@ -556,7 +1029,6 @@ with tab_input:
             st.session_state.df_req = pd.DataFrame(new_rows)
             st.session_state.prev_enablers = current_enablers
 
-        # Now display the editor with dynamic columns
         col_config = {
             "Use Case": st.column_config.TextColumn("Use Case", disabled=True),
             "Name": st.column_config.TextColumn("Name", disabled=True),
@@ -571,15 +1043,14 @@ with tab_input:
             hide_index=True,
             num_rows="dynamic"
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # Dependencies (dynamic rows)
+    # Dependencies
     with input_tabs[5]:
-        st.caption("Define enabler‑to‑enabler dependencies. Add/remove rows as needed.")
-        # Get current enablers for dropdown options
-        if not st.session_state.df_cost.empty:
-            enabler_options = st.session_state.df_cost["Enabler"].tolist()
-        else:
-            enabler_options = []
+        st.markdown("</div>", unsafe_allow_html=True)
+        #st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.caption("Define enabler-to-enabler prerequisites (e.g., E3 requires E2).")
+        enabler_options = st.session_state.df_cost["Enabler"].tolist() if not st.session_state.df_cost.empty else []
         st.session_state.df_dep = st.data_editor(
             st.session_state.df_dep,
             column_config={
@@ -590,17 +1061,80 @@ with tab_input:
             hide_index=True,
             num_rows="dynamic"
         )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Vision tab
+    with input_tabs[6]:
+        st.markdown("</div>", unsafe_allow_html=True)
+        #st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.caption("Higher vision weights steer the solver to prioritize the enablers needed to unlock higher‑vision use cases")
+
+        if not st.session_state.df_ben.empty:
+            current_use_cases = st.session_state.df_ben["Use Case"].tolist()
+            uc_name_map = dict(zip(st.session_state.df_ben["Use Case"], st.session_state.df_ben["Name"]))
+        else:
+            current_use_cases, uc_name_map = [], {}
+
+        if "prev_use_cases_for_vision" not in st.session_state or st.session_state.prev_use_cases_for_vision != current_use_cases:
+            new_rows = []
+            for uc in current_use_cases:
+                old_score = None
+                if not st.session_state.df_vision.empty and uc in st.session_state.df_vision["Use Case"].values:
+                    old_row = st.session_state.df_vision[st.session_state.df_vision["Use Case"] == uc].iloc[0]
+                    old_score = old_row.get("Vision Score (0-1)", None)
+
+                score = float(old_score) if old_score is not None else float(default_vision.get(uc, 0.5))
+
+                new_rows.append({
+                    "Use Case": uc,
+                    "Name": uc_name_map.get(uc, uc),
+                    "Vision Score (0-1)": score,
+                })
+            st.session_state.df_vision = pd.DataFrame(new_rows)
+            st.session_state.prev_use_cases_for_vision = current_use_cases
+
+        st.session_state.df_vision = st.data_editor(
+            st.session_state.df_vision,
+            column_config={
+                "Use Case": st.column_config.TextColumn("Use Case", disabled=True),
+                "Name": st.column_config.TextColumn("Name", disabled=True),
+                "Vision Score (0-1)": st.column_config.NumberColumn(
+                    "Vision Score (0-1)",
+                    min_value=0.0,
+                    max_value=1.0,
+                    step=0.05
+                ),
+            },
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed" if len(current_use_cases) > 0 else "dynamic"
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
-    if st.button("🚀 Run Solver", type="primary"):
+
+    # KEEP original flow: Run Solver button is here in Input tab
+    run_col1, run_col2 = st.columns([0.25, 0.75], vertical_alignment="center")
+    with run_col1:
+        run_solver = st.button("🚀 Run Solver", type="primary", use_container_width=True)
+    with run_col2:
+        st.markdown(
+            '<div class="muted"></div>',
+            unsafe_allow_html=True
+        )
+
+    if run_solver:
         data = get_current_data()
-        result = solve_model(data, roi_periods)
+        with st.spinner("Solving…"):
+            result = solve_model(data, roi_periods, vision_priority)
+
         if result:
             st.session_state.solver_result = result
             st.session_state.current_data = data
             st.success("Optimal solution found!")
         else:
             st.session_state.solver_result = None
+            st.session_state.current_data = None
             st.error("No feasible solution. Adjust inputs or constraints.")
 
 with tab_output:
@@ -610,34 +1144,148 @@ with tab_output:
         res = st.session_state.solver_result
         data = st.session_state.current_data
 
-        out_tabs = st.tabs(["✅ Optimal Plan", "🔮 What‑If"])
+        out_tabs = st.tabs(["✅ Optimal Plan", "🔮 What-If"])
 
+        # ------------------------------------------------------------
+        # Optimal Plan (same as original, but with exec visuals + polish)
+        # ------------------------------------------------------------
         with out_tabs[0]:
-            col1, col2, col3 = st.columns(3)
+            st.markdown(
+                f"""
+                <div class="section-card">
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <div>
+                      <div style="font-weight:800; font-size:16px;">Executive Summary</div>
+                      <div class="muted" style="margin-top:4px;">
+                        Scenario: <b>{scenario}</b> • ROI Window: <b>{', '.join([Lbl[t] for t in roi_periods])}</b>
+                      </div>
+                    </div>
+                    <div class="header-chip" style="color:#0B0F19; border:1px solid #E7EAF0; background:#FFFFFF;">
+                      Objective = Benefit − Cost
+                    </div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            col1, col2, col3, col4, col5 = st.columns(5)
+            insights = compute_exec_insights(res, data, roi_periods)
+
             col1.metric("Total Benefit (ROI window)", f"${res['roi_ben']:.2f}M")
             col2.metric("Total Cost (ROI window)", f"${res['roi_cost']:.2f}M")
             col3.metric("Objective (Benefit - Cost)", f"${res['roi_obj']:.2f}M")
+            col4.metric("ROI Multiple", "—" if insights["roi_multiple"] is None else f"{insights['roi_multiple']:.2f}×")
+            col5.metric("Payback (cum net > 0)", insights["payback"])
 
+            # Charts row
+            df_util = insights["df_util"]
+
+            if _ALTAIR_OK:
+                ch1, ch2 = st.columns(2)
+                with ch1:
+                    st.altair_chart(chart_budget(df_util), use_container_width=True)
+                with ch2:
+                    st.altair_chart(chart_fte(df_util), use_container_width=True)
+
+                ch3, ch4 = st.columns(2)
+                with ch3:
+                    st.altair_chart(chart_value(df_util), use_container_width=True)
+                with ch4:
+                    st.altair_chart(chart_cum_net(df_util), use_container_width=True)
+            else:
+                st.warning("Altair not installed — charts are disabled. Install with: `pip install altair`")
+
+            st.divider()
+
+            # Roadmap timelines
+            if _ALTAIR_OK:
+                left, right = st.columns(2)
+                with left:
+                    st.altair_chart(
+                        chart_gantt(_gantt_df(res["enabler_start_idx"], data["en_name_map"]),
+                                    "Roadmap Timeline: Enablers"),
+                        use_container_width=True,
+                    )
+                with right:
+                    st.altair_chart(
+                        chart_gantt(_gantt_df(res["uc_start_idx"], data["uc_name_map"]),
+                                    "Roadmap Timeline: Use Cases"),
+                        use_container_width=True,
+                    )
+
+            st.divider()
+
+            # KEEP original tables/sections (but polished)
             st.subheader("Enabler Start Plan")
             df_E_opt = pd.DataFrame([
-                {"Enabler": e, "Name": data['en_name_map'].get(e, e), "Start": Lbl[res['enabler_start_idx'][e]] if res['enabler_start_idx'][e] else "-"}
+                {"Enabler": e, "Name": data['en_name_map'].get(e, e),
+                 "Start": Lbl[res['enabler_start_idx'][e]] if res['enabler_start_idx'][e] else "-"}
                 for e in data['enablers']
             ])
             st.dataframe(df_E_opt, use_container_width=True, hide_index=True)
 
             st.subheader("Use Case Start Plan")
             df_UC_opt = pd.DataFrame([
-                {"Use Case": uc, "Name": data['uc_name_map'].get(uc, uc), "Start": Lbl[res['uc_start_idx'][uc]] if res['uc_start_idx'][uc] else "-"}
+                {"Use Case": uc, "Name": data['uc_name_map'].get(uc, uc),
+                 "Start": Lbl[res['uc_start_idx'][uc]] if res['uc_start_idx'][uc] else "-"}
                 for uc in data['use_cases']
             ])
             st.dataframe(df_UC_opt, use_container_width=True, hide_index=True)
 
             st.subheader("Period-by-Period Summary")
-            st.dataframe(res["df_summary"], use_container_width=True, hide_index=True)
+            st.dataframe(_blank_index(res["df_summary"]), use_container_width=True)
 
+            st.divider()
+
+            # Requirements heatmap (helpful for leadership narrative)
+            if _ALTAIR_OK:
+                st.subheader("Requirements Map (Why sequencing matters)")
+                hm = chart_requirements_heatmap(data)
+                if hm is not None:
+                    st.altair_chart(hm, use_container_width=True)
+
+            st.divider()
+
+            # Export section (deck appendix / auditability)
+            st.subheader("Export")
+            zip_bytes = build_download_zip({
+                "enablers_plan.csv": df_E_opt.to_csv(index=False).encode("utf-8"),
+                "use_cases_plan.csv": df_UC_opt.to_csv(index=False).encode("utf-8"),
+                "period_summary.csv": res["df_summary"].to_csv(index=False).encode("utf-8"),
+                "inputs_constraints.csv": st.session_state.df_cons.to_csv(index=False).encode("utf-8"),
+                "inputs_use_case_benefits.csv": st.session_state.df_ben.to_csv(index=False).encode("utf-8"),
+                "inputs_enabler_costs.csv": st.session_state.df_cost.to_csv(index=False).encode("utf-8"),
+                "inputs_enabler_fte.csv": st.session_state.df_fte.to_csv(index=False).encode("utf-8"),
+                "inputs_requirements.csv": st.session_state.df_req.to_csv(index=False).encode("utf-8"),
+                "inputs_dependencies.csv": st.session_state.df_dep.to_csv(index=False).encode("utf-8"),
+                "inputs_vision.csv": st.session_state.df_vision.to_csv(index=False).encode("utf-8"),
+            })
+
+            st.download_button(
+                "⬇️ Download Outputs + Inputs (ZIP)",
+                data=zip_bytes,
+                file_name="benefits_vs_cost_export.zip",
+                mime="application/zip",
+                use_container_width=True,
+            )
+
+        # ------------------------------------------------------------
+        # What-If (same as original, plus polish + charts)
+        # ------------------------------------------------------------
         with out_tabs[1]:
-            st.markdown("Manually adjust enabler start times. The tool checks constraints and recomputes ROI.")
-            # Build editor from current enablers
+            st.markdown(
+                """
+                <div class="section-card">
+                  <div style="font-weight:800; font-size:16px;">What‑If Scenario</div>
+                  <div class="muted" style="margin-top:4px;">
+                    Manually adjust enabler start times. The tool checks constraints and recomputes ROI.
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
             edit_rows = []
             for e in data['enablers']:
                 t0 = res['enabler_start_idx'].get(e)
@@ -664,18 +1312,24 @@ with tab_output:
                 key="whatif_editor"
             )
 
-            if st.button("📊 Calculate What‑If ROI"):
+            run_whatif = st.button("📊 Calculate What-If ROI", type="primary")
+
+            if run_whatif:
                 new_starts = {}
                 for _, row in edited.iterrows():
                     e = row["Enabler"]
                     label = row["Start Period"]
-                    if label == "-":
-                        new_starts[e] = None
-                    else:
-                        new_starts[e] = next(t for t in T if Lbl[t] == label)
+                    new_starts[e] = None if label == "-" else period_label_to_t(label)
 
                 whatif = compute_whatif(data, new_starts, roi_periods)
+                st.session_state.whatif_result = whatif
 
+            if "whatif_result" not in st.session_state:
+                st.info("Adjust start periods and click **Calculate What‑If ROI**.")
+            else:
+                whatif = st.session_state.whatif_result
+
+                # Violations
                 if whatif["dep_violations"]:
                     st.warning("⚠️ Dependency violations:")
                     for v in whatif["dep_violations"]:
@@ -688,20 +1342,49 @@ with tab_output:
                     st.error("👥 FTE violations:")
                     for v in whatif["fte_violations"]:
                         st.write(f"- {v}")
+
                 if not any([whatif["dep_violations"], whatif["budget_violations"], whatif["fte_violations"]]):
                     st.success("All constraints satisfied.")
 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Total Benefit (ROI window)", f"${whatif['roi_ben']:.2f}M")
                 col2.metric("Total Cost (ROI window)", f"${whatif['roi_cost']:.2f}M")
-                col3.metric("Objective (Benefit - Cost)", f"${whatif['roi_obj']:.2f}M",
-                            delta=f"{whatif['roi_obj'] - res['roi_obj']:.2f}M vs optimal")
+                col3.metric(
+                    "Objective (Benefit - Cost)",
+                    f"${whatif['roi_obj']:.2f}M",
+                    delta=f"{whatif['roi_obj'] - res['roi_obj']:+.2f}M vs optimal"
+                )
+                col4.metric("ROI Horizon", f"{horizon} yrs")
 
-                st.subheader("Enabler Start Plan (What‑If)")
+                # Charts for what-if
+                if _ALTAIR_OK:
+                    df_util_w = _df_util_from_summary(whatif["df_summary"], data, roi_periods)
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.altair_chart(chart_budget(df_util_w), use_container_width=True)
+                    with c2:
+                        st.altair_chart(chart_fte(df_util_w), use_container_width=True)
+
+                    c3, c4 = st.columns(2)
+                    with c3:
+                        st.altair_chart(chart_value(df_util_w), use_container_width=True)
+                    with c4:
+                        st.altair_chart(chart_cum_net(df_util_w), use_container_width=True)
+
+                st.subheader("Enabler Start Plan (What-If)")
                 st.dataframe(whatif["df_E"], use_container_width=True, hide_index=True)
 
-                st.subheader("Use Case Start Plan (What‑If)")
+                st.subheader("Use Case Start Plan (What-If)")
                 st.dataframe(whatif["df_UC"], use_container_width=True, hide_index=True)
 
-                st.subheader("Period-by-Period Summary (What‑If)")
-                st.dataframe(whatif["df_summary"], use_container_width=True, hide_index=True)
+                st.subheader("Period-by-Period Summary (What-If)")
+                st.dataframe(_blank_index(whatif["df_summary"]), use_container_width=True)
+
+# Bottom glossary / notes (optional, professional)
+# with st.expander("Notes / Glossary"):
+#     st.write(
+#         "- **Benefit** accrues each period after a use case starts (use case stays active).\n"
+#         "- **Cost** is one-time and charged in the period the enabler starts.\n"
+#         "- **Objective** is always **Benefit − Cost** over the selected ROI window.\n"
+#         "- **Vision Priority** is used only as a small tie-breaker to select among near-equal ROI solutions."
+#     )
