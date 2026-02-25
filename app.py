@@ -17,7 +17,7 @@ import zipfile
 # ------------------------------------------------------------
 st.set_page_config(
     layout="wide",
-    page_title="Benefits Vs. Cost Calculator",
+    page_title="Portfolio Optimization Tool",
     page_icon="📊",
     initial_sidebar_state="expanded",
 )
@@ -1388,4 +1388,5 @@ with tab_output:
 #         "- **Objective** is always **Benefit − Cost** over the selected ROI window.\n"
 #         "- **Vision Priority** is used only as a small tie-breaker to select among near-equal ROI solutions."
 #     )
+
 
