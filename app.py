@@ -845,7 +845,7 @@ def render_header():
             """
             <div style="margin-top:2px;">
               <div style="font-weight:800; font-size: 22px; line-height:1.15; color:#0B0F19;">
-                Benefits Vs. Cost Calculator
+                Portfolio Optimization Tool
               </div>
               <div class="muted" style="margin-top:4px;">
                 ROI roadmap optimizer — objective is to maximize ROI
@@ -1388,5 +1388,6 @@ with tab_output:
 #         "- **Objective** is always **Benefit − Cost** over the selected ROI window.\n"
 #         "- **Vision Priority** is used only as a small tie-breaker to select among near-equal ROI solutions."
 #     )
+
 
 
