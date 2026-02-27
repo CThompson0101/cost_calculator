@@ -243,9 +243,9 @@ default_req = {
 
 # Default dependencies
 default_prereq_ready = {
-    "E3 - Edge Runtime + Fleet Mgmt": ["E2 - NVIDIA Jetson Edge Nodes"],
-    "E5 - MLOps (registry/monitoring)": ["E4 - Plant Data Hub (basic storage/ingest)"],
-    "E6 - OT Integration (MES/SCADA/CMMS connectors)": ["E4 - Plant Data Hub (basic storage/ingest)"],
+    "E3": ["E2"],
+    "E5": ["E4"],
+    "E6": ["E4"],
 }
 
 # ------------------------------------------------------------
@@ -262,6 +262,28 @@ default_vision = {
 # ------------------------------------------------------------
 # Helper functions
 # ------------------------------------------------------------
+def _enabler_label(e: str, en_name_map: dict) -> str:
+    name = (en_name_map or {}).get(e, "")
+    return f"{e} - {name}" if name else e
+
+def _as_enabler_id(val: str, enablers: list[str]) -> str | None:
+    """
+    Accepts:
+      - "E3"
+      - "E3 - Edge Runtime + Fleet Mgmt"
+    Returns:
+      - "E3" if recognized, else None
+    """
+    if val is None:
+        return None
+    s = str(val).strip()
+    if s in enablers:
+        return s
+    if " - " in s:
+        head = s.split(" - ", 1)[0].strip()
+        if head in enablers:
+            return head
+    return None
 def df_to_period_dict(df, id_col, value_cols):
     result = {}
     for _, row in df.iterrows():
@@ -1048,19 +1070,55 @@ with tab_input:
     # Dependencies
     with input_tabs[5]:
         st.markdown("</div>", unsafe_allow_html=True)
-        #st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.caption("Define enabler-to-enabler prerequisites (e.g., E3 requires E2).")
-        enabler_options = st.session_state.df_cost["Enabler"].tolist() if not st.session_state.df_cost.empty else []
-        st.session_state.df_dep = st.data_editor(
-            st.session_state.df_dep,
+
+        # Build ID ↔ label mappings
+        enablers = st.session_state.df_cost["Enabler"].tolist() if not st.session_state.df_cost.empty else []
+        en_name_map = dict(zip(st.session_state.df_cost["Enabler"], st.session_state.df_cost["Name"])) if not st.session_state.df_cost.empty else {}
+
+        id_to_label = {e: _enabler_label(e, en_name_map) for e in enablers}
+        label_to_id = {label: e for e, label in id_to_label.items()}
+        label_options = list(id_to_label.values())
+
+        # Build a DISPLAY df that uses labels (so the user sees names)
+        df_dep_src = st.session_state.df_dep.copy() if "df_dep" in st.session_state and st.session_state.df_dep is not None else pd.DataFrame(columns=["Dependent", "Prerequisite"])
+        if df_dep_src.empty:
+            df_dep_display = pd.DataFrame(columns=["Dependent", "Prerequisite"])
+        else:
+            df_dep_display = df_dep_src.copy()
+
+            # Normalize whatever is currently stored (IDs or "ID - Name") into IDs, then to labels
+            dep_ids = df_dep_display["Dependent"].apply(lambda x: _as_enabler_id(x, enablers))
+            pre_ids = df_dep_display["Prerequisite"].apply(lambda x: _as_enabler_id(x, enablers))
+
+            df_dep_display["Dependent"] = dep_ids.map(id_to_label)
+            df_dep_display["Prerequisite"] = pre_ids.map(id_to_label)
+
+            # Drop rows that couldn't be mapped (prevents broken dependencies)
+            df_dep_display = df_dep_display.dropna(subset=["Dependent", "Prerequisite"]).reset_index(drop=True)
+
+        # Editor shows labels
+        edited_display = st.data_editor(
+            df_dep_display,
             column_config={
-                "Dependent": st.column_config.SelectboxColumn("Dependent", options=enabler_options, required=True),
-                "Prerequisite": st.column_config.SelectboxColumn("Prerequisite", options=enabler_options, required=True),
+                "Dependent": st.column_config.SelectboxColumn("Dependent", options=label_options, required=True),
+                "Prerequisite": st.column_config.SelectboxColumn("Prerequisite", options=label_options, required=True),
             },
             use_container_width=True,
             hide_index=True,
             num_rows="dynamic"
         )
+
+        # Convert labels back to IDs for the solver
+        df_dep_ids = edited_display.copy()
+        df_dep_ids["Dependent"] = df_dep_ids["Dependent"].map(label_to_id)
+        df_dep_ids["Prerequisite"] = df_dep_ids["Prerequisite"].map(label_to_id)
+
+        # Safety: remove any incomplete rows
+        df_dep_ids = df_dep_ids.dropna(subset=["Dependent", "Prerequisite"]).reset_index(drop=True)
+
+        st.session_state.df_dep = df_dep_ids
+
         st.markdown("</div>", unsafe_allow_html=True)
 
     # Vision tab
@@ -1388,6 +1446,7 @@ with tab_output:
 #         "- **Objective** is always **Benefit − Cost** over the selected ROI window.\n"
 #         "- **Vision Priority** is used only as a small tie-breaker to select among near-equal ROI solutions."
 #     )
+
 
 
 
