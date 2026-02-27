@@ -194,10 +194,10 @@ default_fte_cap = {1: 10, 2: 10, 3: 9, 4: 8, 5: 8, 6: 7}
 # Default use cases
 default_use_cases = ["UC1", "UC2", "UC3", "UC4"]
 default_uc_name = {
-    "UC1": "Vision Quality Inspection",
-    "UC2": "Operator Assist (Vision + Guided Work)",
-    "UC3": "Predictive Maintenance",
-    "UC4": "Yard / Inventory Vision",
+    "UC1": "Vision AI/ML for Quality",
+    "UC2": "Digital FIC",
+    "UC3": "Chain Conveyor Monitoring",
+    "UC4": "Job Aid",
 }
 default_benefit = {
     "UC1": {1: 1.8, 2: 2.0, 3: 2.0, 4: 2.1, 5: 2.1, 6: 2.2},
@@ -1388,6 +1388,7 @@ with tab_output:
 #         "- **Objective** is always **Benefit − Cost** over the selected ROI window.\n"
 #         "- **Vision Priority** is used only as a small tie-breaker to select among near-equal ROI solutions."
 #     )
+
 
 
 
