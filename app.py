@@ -243,9 +243,9 @@ default_req = {
 
 # Default dependencies
 default_prereq_ready = {
-    "E3": ["E2"],
-    "E5": ["E4"],
-    "E6": ["E4"],
+    "E3 - Edge Runtime + Fleet Mgmt": ["E2 - NVIDIA Jetson Edge Nodes"],
+    "E5 - MLOps (registry/monitoring)": ["E4 - Plant Data Hub (basic storage/ingest)"],
+    "E6 - OT Integration (MES/SCADA/CMMS connectors)": ["E4 - Plant Data Hub (basic storage/ingest)"],
 }
 
 # ------------------------------------------------------------
@@ -1388,6 +1388,7 @@ with tab_output:
 #         "- **Objective** is always **Benefit − Cost** over the selected ROI window.\n"
 #         "- **Vision Priority** is used only as a small tie-breaker to select among near-equal ROI solutions."
 #     )
+
 
 
 
